@@ -15,3 +15,6 @@ screenshots
 output*
 *.log
 log
+submodules/
+ckpts/
+segment-anything/

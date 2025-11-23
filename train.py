@@ -30,6 +30,7 @@ import numpy as np
 from utils.sh_utils import RGB2SH
 import math
 # import faiss
+
 from scene.kmeans_quantize import Quantize_kMeans
 from bitarray import bitarray
 from utils.system_utils import mkdir_p
