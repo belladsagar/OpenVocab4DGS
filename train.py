@@ -16,7 +16,10 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim, l2_loss
 from gaussian_renderer import render, network_gui
 import sys
-from scene import Scene, GaussianModel
+# from scene import Scene, GaussianModel
+from models.street_gaussian_model import StreetGaussianModel
+from models.scene import Scene
+from scene.dataset import Dataset
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
@@ -163,8 +166,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
+    dataset = Dataset()
+    gaussians = StreetGaussianModel(dataset.scene_info.metadata)
+    scene = Scene(gaussians=gaussians, dataset=dataset)
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)

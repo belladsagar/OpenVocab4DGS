@@ -116,3 +116,15 @@ def RGB2SH(rgb):
 
 def SH2RGB(sh):
     return sh * C0 + 0.5
+
+def IDFT(time, dim):
+    if isinstance(time, float):
+        time = torch.tensor(time)
+    t = time.view(-1, 1).float()
+    idft = torch.zeros(t.shape[0], dim)
+    indices = torch.arange(dim)
+    even_indices = indices[::2]
+    odd_indices = indices[1::2]
+    idft[:, even_indices] = torch.cos(torch.pi * t * even_indices)
+    idft[:, odd_indices] = torch.sin(torch.pi * t * (odd_indices + 1))
+    return idft
