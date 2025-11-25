@@ -9,10 +9,11 @@ from utils.sh_utils import RGB2SH
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from utils.system_utils import mkdir_p
-from utils.data_utils import to_cuda
 from plyfile import PlyData, PlyElement
 from utils.camera_utils import Camera
 
+def sigmoid(x):  
+    return 1 / (1 + np.exp(-x))  
 
 class GaussianModel(nn.Module):
     def __init__(self, model_name='background', num_classes=1):
@@ -42,6 +43,8 @@ class GaussianModel(nn.Module):
         self._scaling = torch.empty(0)
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
+        self._ins_feat = torch.empty(0)     # Continuous instance features before quantization
+        self._ins_feat_q = torch.empty(0)   # Discrete instance features after quantization
         self._semantic = torch.empty(0)
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
@@ -68,6 +71,9 @@ class GaussianModel(nn.Module):
         opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
         semamtics = torch.zeros((fused_point_cloud.shape[0], self.num_classes), dtype=torch.float, device="cuda")
         
+        # Initialize instance features (assuming 6 dims based on ply loading code)
+        ins_feat = torch.rand((fused_point_cloud.shape[0], 6), dtype=torch.float, device="cuda")
+
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
         self._features_dc = nn.Parameter(features[:, :, 0:1].transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(features[:, :, 1:].transpose(1, 2).contiguous().requires_grad_(True))
@@ -75,6 +81,7 @@ class GaussianModel(nn.Module):
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self._semantic = nn.Parameter(semamtics.requires_grad_(True))
+        self._ins_feat = nn.Parameter(ins_feat.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
     def make_ply(self):
@@ -86,11 +93,34 @@ class GaussianModel(nn.Module):
         scale = self._scaling.detach().cpu().numpy()
         rotation = self._rotation.detach().cpu().numpy()
         semantic = self._semantic.detach().cpu().numpy()
+        
+        # Handle instance features (check if quantized version exists, else use continuous)
+        if self._ins_feat_q.numel() > 0:
+            ins_feat = self._ins_feat_q.detach().cpu().numpy()
+        else:
+            ins_feat = self._ins_feat.detach().cpu().numpy()
+        
+        vis_color = (ins_feat + 1) / 2 * 255
+        # Clamp just in case
+        vis_color = np.clip(vis_color, 0, 255)
+        
+        # Use the first 3 dims for RGB visualization in the ply
+        r, g, b = vis_color[:, 0].reshape(-1, 1), vis_color[:, 1].reshape(-1, 1), vis_color[:, 2].reshape(-1, 1)
+
+        # todo: points not fully optimized due to sampled training images.
+        ignored_ind = sigmoid(opacities) < 0.1
+        r[ignored_ind], g[ignored_ind], b[ignored_ind] = 128, 128, 128
 
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
+        dtype_full = dtype_full + [('red', 'u1'), ('green', 'u1'), ('blue', 'u1')] 
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation, semantic), axis=1)
+        # Note: ins_feat must match the construct_list_of_attributes order if included there
+        # But looking at load_ply, ins_feat has specific named properties.
+        # Ideally, we should add ins_feat columns to 'attributes' properly.
+        # Based on load_ply, we have 6 columns for ins_feat.
+        
+        attributes = np.concatenate((xyz, normals, ins_feat, f_dc, f_rest, opacities, scale, rotation, semantic, r, g, b), axis=1)
         elements[:] = list(map(tuple, attributes))
         
         return elements
@@ -111,6 +141,14 @@ class GaussianModel(nn.Module):
         xyz = np.stack((np.asarray(plydata["x"]),
                         np.asarray(plydata["y"]),
                         np.asarray(plydata["z"])),  axis=1)
+        
+        ins_feat = np.stack((np.asarray(plydata.elements[0]["ins_feat_r"]),
+                        np.asarray(plydata.elements[0]["ins_feat_g"]),
+                        np.asarray(plydata.elements[0]["ins_feat_b"]),
+                        np.asarray(plydata.elements[0]["ins_feat_r2"]),
+                        np.asarray(plydata.elements[0]["ins_feat_g2"]),
+                        np.asarray(plydata.elements[0]["ins_feat_b2"])),  axis=1)
+        
         opacities = np.asarray(plydata["opacity"])[..., np.newaxis]
  
         base_f_names = [p.name for p in plydata.properties if p.name.startswith("f_dc_")]
@@ -151,7 +189,7 @@ class GaussianModel(nn.Module):
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
         self._semantic = nn.Parameter(torch.tensor(semantic, dtype=torch.float, device="cuda").requires_grad_(True))
-
+        self._ins_feat = nn.Parameter(torch.tensor(ins_feat, dtype=torch.float, device="cuda").requires_grad_(True))
         self.active_sh_degree = self.max_sh_degree
             
     def load_state_dict(self, state_dict):  
@@ -162,6 +200,13 @@ class GaussianModel(nn.Module):
         self._rotation = state_dict['rotation']
         self._opacity = state_dict['opacity']
         self._semantic = state_dict['semantic']
+        
+        if 'ins_feat' in state_dict:
+            self._ins_feat = state_dict['ins_feat']
+        else:
+            num_points = self._xyz.shape[0]
+            ins_feat = torch.rand((num_points, 6), dtype=torch.float, device="cuda")
+            self._ins_feat = nn.Parameter(ins_feat.requires_grad_(True))
         
         if cfg.mode == 'train':
             self.training_setup()
@@ -188,6 +233,7 @@ class GaussianModel(nn.Module):
             'rotation': self._rotation,
             'opacity': self._opacity,
             'semantic': self._semantic,
+            'ins_feat': self._ins_feat, # Save ins_feat
         }
         
         if not is_final:
@@ -247,6 +293,10 @@ class GaussianModel(nn.Module):
             return torch.nn.functional.softmax(self._semantic, dim=1)
     
     @property
+    def get_ins_feat(self):
+        return self._ins_feat
+
+    @property
     def get_opacity(self):
         return self.opacity_activation(self._opacity)
     
@@ -289,6 +339,9 @@ class GaussianModel(nn.Module):
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.active_sh_degree = 0
                 
+        # Retrieve ins_feat_lr from config, fallback to feature_lr if not present
+        ins_feat_lr = getattr(args, 'ins_feat_lr', args.feature_lr)
+
         l = [
             {'params': [self._xyz], 'lr': args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
             {'params': [self._features_dc], 'lr': args.feature_lr, "name": "f_dc"},
@@ -297,6 +350,7 @@ class GaussianModel(nn.Module):
             {'params': [self._scaling], 'lr': args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': args.rotation_lr, "name": "rotation"},
             {'params': [self._semantic], 'lr': args.semantic_lr, "name": "semantic"},
+            {'params': [self._ins_feat], 'lr': ins_feat_lr, "name": "ins_feat"}, # Added ins_feat
         ]
         
         self.percent_dense = args.percent_dense
@@ -309,7 +363,7 @@ class GaussianModel(nn.Module):
             max_steps=args.position_lr_max_steps
         )
         
-        self.densify_and_prune_list = ['xyz, f_dc, f_rest, opacity, scaling, rotation, semantic']
+        self.densify_and_prune_list = ['xyz, f_dc, f_rest, opacity, scaling, rotation, semantic, ins_feat']
         self.scalar_dict = dict()
         self.tensor_dict = dict()  
         
@@ -317,15 +371,29 @@ class GaussianModel(nn.Module):
         self.optimizer.step()
         self.optimizer.zero_grad(set_to_none=True)
 
-    def update_learning_rate(self, iteration):
+    def update_learning_rate(self, iteration, root_start, leaf_start):
         ''' Learning rate scheduling per step '''
         for param_group in self.optimizer.param_groups:
             if param_group["name"] == "xyz":
                 lr = self.xyz_scheduler_args(iteration)
                 param_group['lr'] = lr
+            if param_group["name"] == "ins_feat":
+                if iteration > root_start and iteration <= leaf_start:      
+                    param_group['lr'] = param_group['lr'] * 0 + 0.0001
+                else:
+                    param_group['lr'] = param_group['lr'] * 0 + 0.001
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
+        
+        # Instance features (Assuming 6 dims as per load_ply)
+        l.append("ins_feat_r")
+        l.append("ins_feat_g")
+        l.append("ins_feat_b")
+        l.append("ins_feat_r2")
+        l.append("ins_feat_g2")
+        l.append("ins_feat_b2")
+
         # All channels except the 3 DC
         for i in range(self._features_dc.shape[1] * self._features_dc.shape[2]):
             l.append('f_dc_{}'.format(i))
@@ -415,8 +483,9 @@ class GaussianModel(nn.Module):
 
     def prune_points(self, mask):
         valid_points_mask = ~mask
+        # Added ins_feat to prune list
         optimizable_tensors = self.prune_optimizer(valid_points_mask, 
-            prune_list = ['xyz', 'f_dc', 'f_rest', 'opacity', 'scaling', 'rotation', 'semantic'])
+            prune_list = ['xyz', 'f_dc', 'f_rest', 'opacity', 'scaling', 'rotation', 'semantic', 'ins_feat'])
 
         self._xyz = optimizable_tensors["xyz"]
         self._features_dc = optimizable_tensors["f_dc"]
@@ -425,6 +494,7 @@ class GaussianModel(nn.Module):
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
         self._semantic = optimizable_tensors["semantic"]
+        self._ins_feat = optimizable_tensors["ins_feat"] # Update ins_feat
 
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
         self.denom = self.denom[valid_points_mask]
@@ -440,6 +510,7 @@ class GaussianModel(nn.Module):
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
         self._semantic = optimizable_tensors["semantic"]
+        self._ins_feat = optimizable_tensors["ins_feat"] # Update ins_feat
         
         cat_points_num = self.get_xyz.shape[0] - self.xyz_gradient_accum.shape[0]
         self.xyz_gradient_accum = torch.cat([self.xyz_gradient_accum, torch.zeros(cat_points_num, 2).cuda()], dim=0)
@@ -477,6 +548,7 @@ class GaussianModel(nn.Module):
         new_features_rest = self._features_rest[selected_pts_mask].repeat(N, 1, 1)
         new_opacity = self._opacity[selected_pts_mask].repeat(N, 1)
         new_semantic = self._semantic[selected_pts_mask].repeat(N, 1)
+        new_ins_feat = self._ins_feat[selected_pts_mask].repeat(N, 1) # Clone and repeat ins_feat
 
         self.densification_postfix({
             "xyz": new_xyz, 
@@ -486,6 +558,7 @@ class GaussianModel(nn.Module):
             "scaling" : new_scaling, 
             "rotation" : new_rotation,
             "semantic" : new_semantic,
+            "ins_feat" : new_ins_feat, # Pass new ins_feat
         })
 
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
@@ -508,6 +581,7 @@ class GaussianModel(nn.Module):
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
         new_semantic = self._semantic[selected_pts_mask]
+        new_ins_feat = self._ins_feat[selected_pts_mask] # Clone ins_feat
 
         self.densification_postfix({
             "xyz": new_xyz, 
@@ -517,6 +591,7 @@ class GaussianModel(nn.Module):
             "scaling" : new_scaling, 
             "rotation" : new_rotation,
             "semantic" : new_semantic,
+            "ins_feat" : new_ins_feat, # Pass new ins_feat
         })
         
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size):

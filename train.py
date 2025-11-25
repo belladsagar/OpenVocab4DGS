@@ -169,27 +169,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     dataset = Dataset()
     gaussians = StreetGaussianModel(dataset.scene_info.metadata)
     scene = Scene(gaussians=gaussians, dataset=dataset)
-    gaussians.training_setup(opt)
+    gaussians.training_setup()
     if checkpoint:
-        (model_params, first_iter) = torch.load(checkpoint)
-        # NOTE: Load the original 3DGS pre-trained checkpoint and add the ins_feat attribute. [OpenGaussian]
-        if len(model_params) == 12:
-            # initialize instance color.
-            ins_feat = torch.rand((model_params[8].shape[0], opt.ins_feat_dim), dtype=torch.float, device="cuda")
-            ins_feat = torch.nn.Parameter(ins_feat.requires_grad_(True))
-            to_list = list(model_params)
-            # (1) replace optimizer
-            to_list[10] = gaussians.optimizer.state_dict()
-            # (2) add ins_feat 
-            to_list.insert(7, ins_feat)
-            # (3) add ins_feat_q (quantized ins_feat)
-            ins_feat_q = torch.empty(0)
-            to_list.insert(8, ins_feat_q)
-            model_params = tuple(to_list)
-        gaussians.restore(model_params, opt)
-        ins_feat_continue = gaussians._ins_feat.clone().detach()    # not used
-    else:
-        ins_feat_continue = None    # not used
+        state_dict = torch.load(checkpoint)
+        start_iter = state_dict['iter']
+        print(f'Loading model from {checkpoint}')
+        gaussians.load_state_dict(state_dict)
+        print(f"Resuming training from iteration {first_iter}")
 
     # initialize the codebook
     ins_feat_codebook = Quantize_kMeans(num_clusters=opt.root_node_num,         # k1
@@ -221,7 +207,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         else:
             leaf_cluster_indices = None
 
-    bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
+    bg_color = [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     iter_start = torch.cuda.Event(enable_timing = True)
@@ -336,11 +322,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                                       pos_weight=opt.pos_weight)   # note: position weight
 
         # render function
-        if iteration <= opt.start_ins_feat_iter:    # stage 0
+        if iteration < opt.start_ins_feat_iter:    # stage 0
             render_feat=False
             render_cluster=False
             cluster_indices=None
-        elif iteration > opt.start_leaf_cb_iter:  # stage 2.2 (fine-level)
+        elif iteration >= opt.start_leaf_cb_iter:  # stage 2.2 (fine-level)
             render_feat=False   
             render_cluster=True
         else:   # stage 1, stage 2.1(coarse-level)
@@ -392,12 +378,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # Start learning instance features after 3W steps.
         if iteration > opt.start_ins_feat_iter:
             # NOTE: Freeze the pre-trained Gaussian parameters and only train the instance features.
-            scene.gaussians._xyz = scene.gaussians._xyz.detach()
-            scene.gaussians._features_dc = scene.gaussians._features_dc.detach()
-            scene.gaussians._features_rest = scene.gaussians._features_rest.detach()
-            scene.gaussians._opacity = scene.gaussians._opacity.detach()
-            scene.gaussians._scaling = scene.gaussians._scaling.detach()
-            scene.gaussians._rotation = scene.gaussians._rotation.detach()
+            scene.gaussians.freeze_all_except_ins_feat()
 
             # construct boolean masks [num_mask, H, W]
             # sam_level, leaf:3, scannet:0
@@ -570,9 +551,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             # Optimizer step
             if iteration < opt.iterations:
-                gaussians.optimizer.step()
-                gaussians.optimizer.zero_grad(set_to_none = True)
-                torch.cuda.empty_cache()
+                gaussians.update_optimizer()
 
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -595,8 +574,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                                           save_memory=opt.save_memory)
         
         # note: save memory (only stage 2, 3)
-        if viewpoint_cam.data_on_gpu and opt.save_memory and cb_mode is not None:
-            viewpoint_cam.to_cpu()
+        # if viewpoint_cam.data_on_gpu and opt.save_memory and cb_mode is not None:
+        viewpoint_cam.to_cpu()
 
 def prepare_output_and_logger(args):    
     if not args.model_path:

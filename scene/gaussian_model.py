@@ -500,3 +500,13 @@ class GaussianModel:
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1
+
+    def freeze_all_except_ins_feat(self):
+        self._xyz.requires_grad = False
+        self._features_dc.requires_grad = False
+        self._features_rest.requires_grad = False
+        self._scaling.requires_grad = False
+        self._rotation.requires_grad = False
+        self._opacity.requires_grad = False
+        self._semantic.requires_grad = False
+        self._ins_feat.requires_grad = True

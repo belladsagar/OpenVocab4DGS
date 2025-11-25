@@ -111,3 +111,13 @@ class GaussianModelBkgd(GaussianModel):
         torch.cuda.empty_cache()
 
         return self.scalar_dict, self.tensor_dict
+    
+    def freeze_all_except_ins_feat(self):
+        self._xyz.requires_grad = False
+        self._features_dc.requires_grad = False
+        self._features_rest.requires_grad = False
+        self._scaling.requires_grad = False
+        self._rotation.requires_grad = False
+        self._opacity.requires_grad = False
+        self._semantic.requires_grad = False
+        self._ins_feat.requires_grad = True

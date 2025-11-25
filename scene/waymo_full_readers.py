@@ -86,6 +86,7 @@ def readWaymoFullInfo(path, images='images', split_train=-1, split_test=-1, **kw
 
     ########################################################################################################################
     cam_infos = []
+    exts = exts[:10]
     for i in tqdm(range(len(exts))):
         # generate pose and image
         ext = exts[i]

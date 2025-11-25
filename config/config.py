@@ -23,7 +23,7 @@ cfg.to_cuda = False # higher GPU utilization with larger memory required
 cfg.source_path = ''
 cfg.model_path = ''
 cfg.record_dir = None
-cfg.resolution = -1
+cfg.resolution = 0.5
 cfg.resolution_scales = [1]
 
 cfg.eval = CN()
@@ -54,6 +54,7 @@ cfg.optim.feature_lr = 0.0025
 cfg.optim.opacity_lr = 0.05
 cfg.optim.scaling_lr = 0.005
 cfg.optim.rotation_lr = 0.001
+cfg.optim.ins_feat_lr = 0.001
 # densification and pruning
 cfg.optim.percent_dense = 0.01 
 cfg.optim.densification_interval = 100

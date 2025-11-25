@@ -20,12 +20,17 @@ class Camera(nn.Module):
         self, 
         id,
         R, T, 
-        FoVx, FoVy, K,
+        FoVx, FoVy,
+        cx, cy, 
+        K,
+        gt_alpha_mask,
+        gt_sam_mask, gt_mask_feat,
         image, image_name, 
         trans = np.array([0.0, 0.0, 0.0]), 
         scale = 1.0,
         metadata = dict(),
         guidance=dict(),
+        data_device = "cuda"
     ):
         super(Camera, self).__init__()
 
@@ -35,8 +40,13 @@ class Camera(nn.Module):
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.K = K
+        self.cx = cx
+        self.cy = cy
         self.image_name = image_name
         self.trans, self.scale = trans, scale
+
+        self.data_device = torch.device(data_device)
+        self.data_on_gpu = False
 
         # metadata
         self.meta = metadata
@@ -45,8 +55,25 @@ class Camera(nn.Module):
         self.guidance = guidance
         self.original_image = image.clamp(0., 1.)
 
-        self.original_image = image.clamp(0, 1)                
+        # modify -----
+        self.original_mask = gt_alpha_mask if gt_alpha_mask is not None else None
+
+        # modify -----
+        self.original_sam_mask = gt_sam_mask if gt_sam_mask is not None else None
+        self.original_mask_feat = gt_mask_feat if gt_mask_feat is not None else None
+        self.pesudo_ins_feat = None
+        self.pesudo_mask_bool = None
+        self.cluster_masks = None
+        self.bClusterOccur = None
+           
         self.image_height, self.image_width = self.original_image.shape[1], self.original_image.shape[2]
+
+        if gt_alpha_mask is not None:
+            self.original_image *= gt_alpha_mask
+        else:
+            self.original_image *= torch.ones((1, self.image_height, self.image_width))
+
+
         self.zfar = 1000.0
         self.znear = 0.001
         self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
@@ -67,6 +94,22 @@ class Camera(nn.Module):
         if 'extrinsic' in self.meta.keys():
             self.extrinsic = torch.from_numpy(self.meta['extrinsic']).float().cuda()
             del self.meta['extrinsic']
+
+    # modify -----
+    def to_gpu(self):
+        for attr_name in dir(self):
+            attr = getattr(self, attr_name)
+            if isinstance(attr, torch.Tensor) and not attr.is_cuda:
+                setattr(self, attr_name, attr.to('cuda'))
+        self.data_on_gpu = True
+
+    # modify -----
+    def to_cpu(self):
+        for attr_name in dir(self):
+            attr = getattr(self, attr_name)
+            if isinstance(attr, torch.Tensor) and attr.is_cuda:
+                setattr(self, attr_name, attr.to('cpu'))
+        self.data_on_gpu = False
                 
     def set_extrinsic(self, c2w):
         w2c = np.linalg.inv(c2w)
@@ -137,15 +180,30 @@ WARNED = False
 def loadCam(cam_info: CameraInfo, resolution_scale, scale=1.0):
     orig_w = cam_info.width
     orig_h = cam_info.height
-    scale = min(scale, 1600 / orig_w)
     scale = scale / resolution_scale
     resolution = (int(orig_w * scale), int(orig_h * scale))
 
     K = copy.deepcopy(cam_info.K)
     K[:2] *= scale
+    resized_image_rgb = PILtoTorch(cam_info.image, resolution)
 
-    image = PILtoTorch(cam_info.image, resolution, resize_mode=Image.BILINEAR)[:3, ...]
+    gt_sam_mask = cam_info.sam_mask
+    gt_sam_mask = torch.from_numpy(gt_sam_mask)
+    # # align resolution
+    # if resized_image_rgb.shape[1] != gt_sam_mask.shape[1]:
+    #     resolution = (gt_sam_mask.shape[2], gt_sam_mask.shape[1])   # modify -----
+    #     resized_image_rgb = PILtoTorch(cam_info.image, resolution)  # [C, H, W]
+    mask_feat = torch.from_numpy(cam_info.mask_feat)
+
+    gt_image = resized_image_rgb[:3, ...]
+    loaded_mask = None
+
+    if resized_image_rgb.shape[0] == 4:
+        loaded_mask = resized_image_rgb[3:4, ...]
+
     guidance = loadguidance(cam_info.guidance, resolution)
+
+    mask_feat = torch.from_numpy(cam_info.mask_feat)
 
     return Camera(
         id=cam_info.uid,
@@ -153,8 +211,11 @@ def loadCam(cam_info: CameraInfo, resolution_scale, scale=1.0):
         T=cam_info.T,
         FoVx=cam_info.FovX,
         FoVy=cam_info.FovY,
+        cx=cam_info.cx * scale, cy=cam_info.cy * scale,
         K=K,
-        image=image,
+        gt_alpha_mask=loaded_mask,
+        gt_sam_mask=gt_sam_mask, gt_mask_feat=mask_feat,
+        image=gt_image,
         image_name=cam_info.image_name,
         metadata=cam_info.metadata,
         guidance=guidance,
@@ -165,7 +226,7 @@ def cameraList_from_camInfos(cam_infos, resolution_scale):
     camera_list = []
 
     for i, cam_info in tqdm(enumerate(cam_infos)):
-        camera_list.append(loadCam(cam_info, resolution_scale))
+        camera_list.append(loadCam(cam_info, resolution_scale, scale=cfg.resolution))
 
     return camera_list
 

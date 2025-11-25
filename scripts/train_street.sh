@@ -20,11 +20,12 @@
 # ============== [10 scenes] ==============
 scan_list=("031" )
 
-gpu_num=3     # change!
+gpu_num=2     # change!
 for scan in "${scan_list[@]}"; do
     echo "Training for ${scan} ....."
     CUDA_VISIBLE_DEVICES=$gpu_num python train.py --port 601$gpu_num \
         -s /data/riu/waymo/waymo/processed/training/${scan} \
+        --start_checkpoint output/waymo_full_exp_1/waymo_train_031/trained_model/iteration_50000.pth \
         -r 2 \
         --frozen_init_pts \
         --iterations 40_000 \

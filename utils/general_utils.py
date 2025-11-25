@@ -9,6 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+
 import numpy as np
 import random
 import roma
@@ -20,6 +21,8 @@ import sys
 import cv2
 from datetime import datetime
 from PIL import Image
+from tqdm import tqdm
+from utils.graphics_utils import focal2fov
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -33,7 +36,7 @@ def PILtoTorch(pil_image, resolution=None, resize_mode=Image.BILINEAR):
         return resized_image.permute(2, 0, 1)
     else:
         return resized_image.unsqueeze(dim=-1).permute(2, 0, 1)
-
+    
 def NumpytoTorch(image, resolution, resize_mode=cv2.INTER_AREA):
     if resolution is not None:
         image = cv2.resize(image, resolution, interpolation=resize_mode)
@@ -47,7 +50,7 @@ def NumpytoTorch(image, resolution, resize_mode=cv2.INTER_AREA):
     return image
 
 def get_expon_lr_func(
-    lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000
+    lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000, warmup_steps=0
 ):
     """
     Copied from Plenoxels
@@ -65,7 +68,7 @@ def get_expon_lr_func(
     """
 
     def helper(step):
-        if step < 0 or (lr_init == 0.0 and lr_final == 0.0):
+        if step < 0 or (lr_init == 0.0 and lr_final == 0.0) or (step < warmup_steps):
             # Disable this parameter
             return 0.0
         if lr_delay_steps > 0:
@@ -355,6 +358,39 @@ def quaternion_slerp(q0: torch.Tensor, q1: torch.Tensor, step=0.5) -> torch.Tens
     
     return q
 
+def build_scaling_rotation(s, r):
+    L = torch.zeros((s.shape[0], 3, 3), dtype=torch.float, device="cuda")
+    R = quaternion_to_matrix(r)
+
+    L[:, 0, 0] = s[:, 0]
+    L[:, 1, 1] = s[:, 1]
+    L[:, 2, 2] = s[:, 2]
+
+    L = R @ L
+    return L
+
+def safe_state(silent):
+    old_f = sys.stdout
+    class F:
+        def __init__(self, silent):
+            self.silent = silent
+
+        def write(self, x):
+            if not self.silent:
+                if x.endswith("\n"):
+                    old_f.write(x.replace("\n", " [{}]\n".format(str(datetime.now().strftime("%d/%m %H:%M:%S")))))
+                else:
+                    old_f.write(x)
+
+        def flush(self):
+            old_f.flush()
+
+    # sys.stdout = F(silent)
+
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    # torch.cuda.set_device(torch.device("cuda:0"))
 
 def startswith_any(k, l):
     for s in l:

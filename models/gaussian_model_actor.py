@@ -269,6 +269,16 @@ class GaussianModelActor(GaussianModel):
         reg_loss = (scaling_max / self.extent).mean()
         
         return reg_loss
+
+    def freeze_all_except_ins_feat(self):
+        self._xyz.requires_grad = False
+        self._features_dc.requires_grad = False
+        self._features_rest.requires_grad = False
+        self._scaling.requires_grad = False
+        self._rotation.requires_grad = False
+        self._opacity.requires_grad = False
+        self._semantic.requires_grad = False
+        self._ins_feat.requires_grad = True
         
         
     

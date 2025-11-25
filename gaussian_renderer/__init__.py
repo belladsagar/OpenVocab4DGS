@@ -13,13 +13,13 @@ import torch
 import math
 # from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from ashawkey_diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from utils.opengs_utlis import *
 # from sklearn.neighbors import NearestNeighbors
 import pytorch3d.ops
+from typing import Union
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, iteration,
+def render(viewpoint_camera, pc, pipe, bg_color : torch.Tensor, iteration,
             scaling_modifier = 1.0, override_color = None, visible_mask = None, mask_num=0,
             cluster_idx=None,       # per-point cluster id (coarse-level)
             leaf_cluster_idx=None,  # per-point cluster id (fine-level)
@@ -42,6 +42,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     """
  
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
+    include_list = list(set(pc.model_name_id.keys()))
+    pc.set_visibility(include_list)
+    pc.parse_camera(viewpoint_camera)
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
         screenspace_points.retain_grad()

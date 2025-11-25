@@ -168,6 +168,8 @@ class StreetGaussianModel(nn.Module):
         self.obj_list = []
         self.models_num = 0
         self.obj_info = obj_info
+
+        self.iClusterSubNum = torch.empty(0)
         
         # Build background model
         if self.include_background:
@@ -379,9 +381,20 @@ class StreetGaussianModel(nn.Module):
        
         return features
     
-    @property
-    def get_ins_feat(self):
-        ...
+    def get_ins_feat(self, origin=False):
+        ins_feats = []
+
+        if self.get_visibility('background'):
+            ins_feat_bkgd = self.background.get_ins_feat
+            ins_feats.append(ins_feat_bkgd)
+        
+        for obj_name in self.graph_obj_list:
+            obj_model: GaussianModelActor = getattr(self, obj_name)
+            ins_feat = obj_model.get_ins_feat
+            ins_feats.append(ins_feat)
+
+        ins_feats = torch.cat(ins_feats, dim=0)
+        return ins_feats
     
     def get_colors(self, camera_center):
         colors = []
@@ -514,12 +527,12 @@ class StreetGaussianModel(nn.Module):
         if self.pose_correction is not None:
             self.pose_correction.training_setup()
         
-    def update_learning_rate(self, iteration, exclude_list=[]):
+    def update_learning_rate(self, iteration, root_start, leaf_start, exclude_list=[]):
         for model_name in self.model_name_id.keys():
             if startswith_any(model_name, exclude_list):
                 continue
             model: GaussianModel = getattr(self, model_name)
-            model.update_learning_rate(iteration)
+            model.update_learning_rate(iteration, root_start, leaf_start)
         
         if self.actor_pose is not None:
             self.actor_pose.update_learning_rate(iteration)
@@ -604,3 +617,24 @@ class StreetGaussianModel(nn.Module):
             if startswith_any(model_name, exclude_list):
                 continue
             model.reset_opacity()
+
+    def freeze_all_except_ins_feat(self):
+        for model_name in self.model_name_id.keys():
+            model: GaussianModel = getattr(self, model_name)
+            model.freeze_all_except_ins_feat()
+        
+        if self.actor_pose is not None:
+            for param in self.actor_pose.parameters():
+                param.requires_grad = False
+            
+        if self.sky_cubemap is not None:
+            for param in self.sky_cubemap.parameters():
+                param.requires_grad = False
+            
+        if self.color_correction is not None:
+            for param in self.color_correction.parameters():
+                param.requires_grad = False
+            
+        if self.pose_correction is not None:
+            for param in self.pose_correction.parameters():
+                param.requires_grad = False
