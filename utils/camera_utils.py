@@ -76,23 +76,23 @@ class Camera(nn.Module):
 
         self.zfar = 1000.0
         self.znear = 0.001
-        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
+        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1)
         
         if self.K is not None:
-            self.projection_matrix = getProjectionMatrixK(znear=self.znear, zfar=self.zfar, K=self.K, H=self.image_height, W=self.image_width).transpose(0,1).cuda()
-            self.K = torch.from_numpy(self.K).float().cuda()
+            self.projection_matrix = getProjectionMatrixK(znear=self.znear, zfar=self.zfar, K=self.K, H=self.image_height, W=self.image_width).transpose(0,1)
+            self.K = torch.from_numpy(self.K).float()
         else:
-            self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
+            self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1)
 
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
         
         if 'ego_pose' in self.meta.keys():
-            self.ego_pose = torch.from_numpy(self.meta['ego_pose']).float().cuda()
+            self.ego_pose = torch.from_numpy(self.meta['ego_pose']).float()
             del self.meta['ego_pose']
             
         if 'extrinsic' in self.meta.keys():
-            self.extrinsic = torch.from_numpy(self.meta['extrinsic']).float().cuda()
+            self.extrinsic = torch.from_numpy(self.meta['extrinsic']).float()
             del self.meta['extrinsic']
 
     # modify -----
@@ -121,13 +121,13 @@ class Camera(nn.Module):
         self.T = T
         
         # change attributes associated with R, T
-        self.world_view_transform = torch.tensor(getWorld2View2(R, T, self.trans, self.scale)).transpose(0, 1).cuda()
+        self.world_view_transform = torch.tensor(getWorld2View2(R, T, self.trans, self.scale)).transpose(0, 1)
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
     
     def set_intrinsic(self, K):
         self.K = torch.from_numpy(K).float().cuda()
-        self.projection_matrix = getProjectionMatrixK(znear=self.znear, zfar=self.zfar, K=self.K, H=self.image_height, W=self.image_width).transpose(0,1).cuda()
+        self.projection_matrix = getProjectionMatrixK(znear=self.znear, zfar=self.zfar, K=self.K, H=self.image_height, W=self.image_width).transpose(0,1)
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
     
     def get_extrinsic(self):

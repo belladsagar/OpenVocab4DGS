@@ -166,9 +166,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    dataset = Dataset()
-    gaussians = StreetGaussianModel(dataset.scene_info.metadata)
-    scene = Scene(gaussians=gaussians, dataset=dataset)
+    dataset_ = Dataset(dataset)
+    gaussians = StreetGaussianModel(dataset_.scene_info.metadata)
+    scene = Scene(gaussians=gaussians, dataset=dataset_)
     gaussians.training_setup()
     if checkpoint:
         state_dict = torch.load(checkpoint)
@@ -346,6 +346,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                             render_feat_map=render_feat, 
                             render_cluster=render_cluster,
                             selected_root_id=root_id)       # coarse id (stage 2.2)
+
         # rendered results
         image, viewspace_point_tensor, visibility_filter, radii = \
             render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
@@ -576,6 +577,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # note: save memory (only stage 2, 3)
         # if viewpoint_cam.data_on_gpu and opt.save_memory and cb_mode is not None:
         viewpoint_cam.to_cpu()
+        # print(iteration)
+        # import time
+        # time.sleep(10)
 
 def prepare_output_and_logger(args):    
     if not args.model_path:
@@ -976,8 +980,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1000, 10000, 30_000, 40_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1000, 10000, 30_000, 40_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)

@@ -14,9 +14,9 @@ sceneLoadTypeCallbacks = {
 }
 
 class Dataset():
-    def __init__(self):
+    def __init__(self, dataset):
         self.cfg = cfg.data
-        self.model_path = cfg.model_path
+        self.model_path = dataset.model_path
         self.source_path = cfg.source_path
         self.images = self.cfg.images
 

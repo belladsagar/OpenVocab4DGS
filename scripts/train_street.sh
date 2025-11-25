@@ -20,7 +20,7 @@
 # ============== [10 scenes] ==============
 scan_list=("031" )
 
-gpu_num=2     # change!
+gpu_num=0     # change!
 for scan in "${scan_list[@]}"; do
     echo "Training for ${scan} ....."
     CUDA_VISIBLE_DEVICES=$gpu_num python train.py --port 601$gpu_num \
@@ -32,7 +32,7 @@ for scan in "${scan_list[@]}"; do
         --start_ins_feat_iter 0 \
         --start_root_cb_iter 20_000 \
         --start_leaf_cb_iter 20_000 \
-        --sam_level 0 \
+        --sam_level 3 \
         --root_node_num 64 \
         --leaf_node_num 5 \
         --pos_weight 1.0 \

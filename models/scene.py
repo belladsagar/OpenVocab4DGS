@@ -15,6 +15,7 @@ class Scene:
     def __init__(self, gaussians: Union[GaussianModel, StreetGaussianModel], dataset: Dataset):
         self.dataset = dataset
         self.gaussians = gaussians
+        self.model_path = dataset.model_path
         
         if cfg.mode == 'train':
             point_cloud = self.dataset.scene_info.point_cloud
