@@ -14,7 +14,7 @@ from scene.colmap_loader import read_points3D_binary, read_extrinsics_binary, qv
 from utils.data_utils import get_val_frames
 from utils.graphics_utils import get_rays, sphere_intersection
 from utils.general_utils import matrix_to_quaternion, quaternion_to_matrix_numpy
-from scene.base_readers import storePly, fetchPly, getNerfppNorm
+from scene.base_readers import storePly, fetchPly, getNerfppNorm, get_Sphere_Norm
 
 waymo_track2label = {"vehicle": 0, "pedestrian": 1, "cyclist": 2, "sign": 3, "misc": -1}
 
