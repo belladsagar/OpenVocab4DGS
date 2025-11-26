@@ -638,3 +638,17 @@ class StreetGaussianModel(nn.Module):
         if self.pose_correction is not None:
             for param in self.pose_correction.parameters():
                 param.requires_grad = False
+
+
+    def capture(self):
+        state = {}
+        for model_name in self.model_name_id.keys():
+            model: GaussianModel = getattr(self, model_name)
+            state[model_name] = model.capture()
+        return state
+    
+    def restore(self, model_args, training_args=None):
+        for model_name in self.model_name_id.keys():
+            if model_name in model_args:
+                model: GaussianModel = getattr(self, model_name)
+                model.restore(model_args[model_name], training_args)
