@@ -333,6 +333,21 @@ class StreetGaussianModel(nn.Module):
 
         rotations = torch.cat(rotations, dim=0)
         return rotations
+
+    @property
+    def get_model(self):
+        models = []
+        if self.get_visibility('background'):
+            model_bkgd = self.background
+            if self.use_pose_correction:
+                model_bkgd = self.pose_correction.correct_gaussian_model(self.viewpoint_camera, model_bkgd)
+            models.append(model_bkgd)
+        
+        for i, obj_name in enumerate(self.graph_obj_list):
+            obj_model: GaussianModelActor = getattr(self, obj_name)
+            models.append(obj_model)
+    
+        return models
     
     @property
     def get_xyz(self):
@@ -385,12 +400,12 @@ class StreetGaussianModel(nn.Module):
         ins_feats = []
 
         if self.get_visibility('background'):
-            ins_feat_bkgd = self.background.get_ins_feat
+            ins_feat_bkgd = self.background.get_ins_feat(origin=origin)
             ins_feats.append(ins_feat_bkgd)
         
         for obj_name in self.graph_obj_list:
             obj_model: GaussianModelActor = getattr(self, obj_name)
-            ins_feat = obj_model.get_ins_feat
+            ins_feat = obj_model.get_ins_feat(origin=origin)
             ins_feats.append(ins_feat)
 
         ins_feats = torch.cat(ins_feats, dim=0)

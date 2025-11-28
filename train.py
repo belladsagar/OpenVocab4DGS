@@ -313,20 +313,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if cb_mode == "leaf":
             freq_k_means = 50    # todo fine-level codebook update frequency
         if cb_mode is not None:
-            if (iteration % freq_k_means == 1) or iteration == opt.start_root_cb_iter + 1:
+            if (iteration % freq_k_means == 1) or iteration == opt.start_root_cb_iter + 1 or iteration == opt.start_leaf_cb_iter + 1:
                 assign = True   # Reassign cluster centers
             else:
                 assign = False  #  update cluster centers
             ins_feat_codebook.forward(gaussians, iteration, assign=assign, \
                                       mode=cb_mode, selected_leaf=root_id, \
-                                      pos_weight=opt.pos_weight)   # note: position weight
+                                       pos_weight=opt.pos_weight)   # note: position weight
 
         # render function
-        if iteration < opt.start_ins_feat_iter:    # stage 0
+        if iteration <= opt.start_ins_feat_iter:    # stage 0
             render_feat=False
             render_cluster=False
             cluster_indices=None
-        elif iteration >= opt.start_leaf_cb_iter:  # stage 2.2 (fine-level)
+        elif iteration > opt.start_leaf_cb_iter:  # stage 2.2 (fine-level)
             render_feat=False   
             render_cluster=True
         else:   # stage 1, stage 2.1(coarse-level)
@@ -532,23 +532,23 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     save_kmeans([ins_feat_codebook], ["ins_feat"], out_dir, mode="root")
                     if cb_mode == "leaf":
                         save_kmeans([ins_feat_codebook], ["ins_feat"], out_dir, mode="leaf")
-                    scene.save(iteration, ["ins_feat"])
+                    scene.save(iteration)
                 else:
                     scene.save(iteration)
 
-            # Densification
-            if iteration < opt.densify_until_iter and \
-                not opt.frozen_init_pts: # note: ScanNet dataset is not densified [OpenGaussian]
-                # Keep track of max radii in image-space for pruning
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+            # # Densification
+            # if iteration < opt.densify_until_iter and \
+            #     not opt.frozen_init_pts: # note: ScanNet dataset is not densified [OpenGaussian]
+            #     # Keep track of max radii in image-space for pruning
+            #     gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+            #     gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
+            #     if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+            #         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+            #         gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
 
-                if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
-                    gaussians.reset_opacity()
+            #     if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
+            #         gaussians.reset_opacity()
 
             # Optimizer step
             if iteration < opt.iterations:

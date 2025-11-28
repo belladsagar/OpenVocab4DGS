@@ -175,14 +175,14 @@ class Quantize_kMeans():
             if chunk:
                 self.nn_index = None
                 i = 0
-                chunk = 10000
+                chunk_size = 10000 # Renamed to chunk_size to avoid shadowing boolean
                 if mode == "root":
                     while True:
-                        dist = self.get_dist(feat[i*chunk:(i+1)*chunk, :], self.centers)
+                        dist = self.get_dist(feat[i*chunk_size:(i+1)*chunk_size, :], self.centers)
                         curr_nn_index = torch.argmin(dist, dim=-1)  # [1W]
                         # Assign a single cluster when distance to multiple clusters is same
                         dist = F.one_hot(curr_nn_index, self.num_clusters).type(torch.float32)  # [1W, 512]
-                        curr_centers = self.update_centers_(feat[i*chunk:(i+1)*chunk, :], dist, curr_nn_index, avg=False)   # [512, 45]
+                        curr_centers = self.update_centers_(feat[i*chunk_size:(i+1)*chunk_size, :], dist, curr_nn_index, avg=False)   # [512, 45]
                         counts += dist.detach().sum(0) + 1e-6   # [512]
                         tmp_centers += curr_centers
                         if self.nn_index == None:
@@ -190,7 +190,7 @@ class Quantize_kMeans():
                         else:
                             self.nn_index = torch.cat((self.nn_index, curr_nn_index), dim=0)
                         i += 1
-                        if i*chunk > feat.shape[0]:
+                        if i*chunk_size > feat.shape[0]:
                             break
                 elif mode == "leaf":
                     for idx_c in range(self.num_clusters):
@@ -217,17 +217,17 @@ class Quantize_kMeans():
         if chunk:
             self.nn_index = None
             i = 0
-            # chunk = 100000
+            chunk_size = 10000 # Renamed from chunk to chunk_size
             if mode == "root":
                 while True:
-                    dist = self.get_dist(feat_scaled[i * chunk:(i + 1) * chunk, :], self.centers)
+                    dist = self.get_dist(feat_scaled[i * chunk_size:(i + 1) * chunk_size, :], self.centers)
                     curr_nn_index = torch.argmin(dist, dim=-1)
                     if self.nn_index == None:
                         self.nn_index = curr_nn_index
                     else:
                         self.nn_index = torch.cat((self.nn_index, curr_nn_index), dim=0)
                     i += 1
-                    if i * chunk > feat.shape[0]:
+                    if i * chunk_size > feat.shape[0]:
                         break
             elif mode == "leaf":
                 for idx_c in range(self.num_clusters):
@@ -250,6 +250,13 @@ class Quantize_kMeans():
             return feat / (scale + 1e-8)
 
     def forward(self, gaussian, iteration, assign=False, mode="root", selected_leaf=-1, pos_weight=1.0):
+        # Check if the input is a StreetGaussianModel (container of models)
+        if hasattr(gaussian, 'model_name_id'):
+            self._forward_container(gaussian, iteration, assign, mode, selected_leaf, pos_weight)
+        else:
+            self._forward_single(gaussian, iteration, assign, mode, selected_leaf, pos_weight)
+
+    def _forward_single(self, gaussian, iteration, assign, mode, selected_leaf, pos_weight):
         if mode == "root":
             # (1) coarse-level: feature + xyz
             scale = pos_weight     # TODO
@@ -273,6 +280,33 @@ class Quantize_kMeans():
         sampled_centers = torch.gather(centers, 0, self.nn_index.unsqueeze(-1).repeat(1, vec_dim))
         # NOTE: "During backpropagation, the gradients of the quantized features are copied to the instance features", mentioned in the paper.
         gaussian._ins_feat_q = gaussian._ins_feat - gaussian._ins_feat.detach() + sampled_centers[:,:6]
+
+    def _forward_container(self, street_model, iteration, assign, mode, selected_leaf, pos_weight):
+        # Aggregate logic for StreetGaussianModel
+        models = street_model.get_model
+        combined_xyz = street_model.get_xyz
+        combined_ins_feat = street_model.get_ins_feat(origin=True)
+
+        # Helper wrapper to pass to _forward_single logic without creating circular dependency
+        class GaussianWrapper:
+            def __init__(self, xyz, ins_feat):
+                self._xyz = xyz
+                self._ins_feat = ins_feat
+                self._ins_feat_q = None
+
+        wrapper = GaussianWrapper(combined_xyz, combined_ins_feat)
+        
+        # Run the standard logic on the combined data
+        self._forward_single(wrapper, iteration, assign, mode, selected_leaf, pos_weight)
+        
+        # Distribute the quantized features back to the individual models
+        if wrapper._ins_feat_q is not None:
+            start_idx = 0
+            for model in models:
+                num_points = model._xyz.shape[0]
+                # Slice and assign back
+                model._ins_feat_q = wrapper._ins_feat_q[start_idx : start_idx + num_points]
+                start_idx += num_points
 
     def replace_with_centers(self, gaussian):
         deg = gaussian._features_rest.shape[1]

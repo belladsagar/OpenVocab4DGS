@@ -292,9 +292,13 @@ class GaussianModel(nn.Module):
         elif self.semantic_mode == 'probabilities':
             return torch.nn.functional.softmax(self._semantic, dim=1)
     
-    @property
-    def get_ins_feat(self):
-        return self._ins_feat
+    def get_ins_feat(self, origin=False):
+        if len(self._ins_feat_q) == 0 or origin:
+            ins_feat = self._ins_feat
+        else:
+            ins_feat = self._ins_feat_q
+        ins_feat = torch.nn.functional.normalize(ins_feat, dim=1)
+        return ins_feat
 
     @property
     def get_opacity(self):
